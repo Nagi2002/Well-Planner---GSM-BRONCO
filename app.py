@@ -44,8 +44,6 @@ HEX_TO_COLOR_NAME = {
     for name, hex_value in COLOR_OPTIONS.items()
 }
 
-
-# Colores predeterminados para proyectos antiguos
 COLORS = {
     "Construcción": "#A9D18E",
     "Terminación": "#FFF200",
@@ -78,7 +76,6 @@ st.set_page_config(
 def load_css() -> None:
 
     if CSS_FILE.exists():
-
         css_content = CSS_FILE.read_text(
             encoding="utf-8"
         )
@@ -112,7 +109,6 @@ def load_project() -> dict:
         "r",
         encoding="utf-8",
     ) as file:
-
         return json.load(file)
 
 
@@ -165,16 +161,12 @@ def normalize(
     if df is None:
         df = pd.DataFrame()
 
-    df = pd.DataFrame(
-        df
-    ).copy()
+    df = pd.DataFrame(df).copy()
 
     for column in required_columns:
-
         if column not in df.columns:
             df[column] = None
 
-    # Eliminar columnas temporales
     df = df.drop(
         columns=[
             "delete",
@@ -218,9 +210,7 @@ def normalize(
         errors="coerce",
     ).fillna(0)
 
-    df["progress"] = df[
-        "progress"
-    ].clip(
+    df["progress"] = df["progress"].clip(
         lower=0,
         upper=100,
     )
@@ -279,7 +269,6 @@ def normalize(
             pd.notna(current_color)
             and str(current_color).strip()
         ):
-
             return validate_hex_color(
                 current_color,
                 fallback,
@@ -352,10 +341,7 @@ def normalize(
 def initialize() -> None:
 
     if "project_data" not in st.session_state:
-
-        st.session_state.project_data = (
-            load_project()
-        )
+        st.session_state.project_data = load_project()
 
     if "activities" not in st.session_state:
 
@@ -368,11 +354,9 @@ def initialize() -> None:
             )
         )
 
-        st.session_state.activities = (
-            normalize(
-                pd.DataFrame(
-                    activities
-                )
+        st.session_state.activities = normalize(
+            pd.DataFrame(
+                activities
             )
         )
 
@@ -383,10 +367,68 @@ def initialize() -> None:
 
 def build_gantt(
     df: pd.DataFrame,
-    year: int,
+    start_year: int,
+    years_to_show: int = 1,
 ) -> go.Figure:
 
     fig = go.Figure()
+
+    years_to_show = max(
+        1,
+        min(
+            int(years_to_show),
+            3,
+        ),
+    )
+
+    # ========================================================
+    # TAMAÑOS ADAPTATIVOS
+    # ========================================================
+
+    if years_to_show == 1:
+
+        year_font_size = 17
+        quarter_font_size = 15
+        month_font_size = 12
+        week_font_size = 10
+        bar_font_size = 11
+
+    elif years_to_show == 2:
+
+        year_font_size = 17
+        quarter_font_size = 12
+        month_font_size = 10
+        week_font_size = 9
+        bar_font_size = 10
+
+    else:
+
+        year_font_size = 16
+        quarter_font_size = 11
+        month_font_size = 8
+        week_font_size = 7
+        bar_font_size = 9
+
+    # ========================================================
+    # RANGO TEMPORAL
+    # ========================================================
+
+    start = pd.Timestamp(
+        year=start_year,
+        month=1,
+        day=1,
+    )
+
+    end = pd.Timestamp(
+        year=start_year + years_to_show,
+        month=1,
+        day=1,
+    )
+
+    display_end = (
+        end
+        - pd.Timedelta(days=1)
+    )
 
     if df.empty:
 
@@ -411,13 +453,11 @@ def build_gantt(
 
         return fig
 
-    df = normalize(
-        df
-    )
+    df = normalize(df)
 
-    # --------------------------------------------------------
+    # ========================================================
     # ORDEN DE EQUIPOS
-    # --------------------------------------------------------
+    # ========================================================
 
     rig_order = list(
         dict.fromkeys(
@@ -435,9 +475,9 @@ def build_gantt(
 
     current_y = 0.0
 
-    # --------------------------------------------------------
+    # ========================================================
     # FILAS PLAN / REAL
-    # --------------------------------------------------------
+    # ========================================================
 
     for rig in rig_order:
 
@@ -448,7 +488,6 @@ def build_gantt(
 
         if rig_rows.empty:
             capacity_hp = 0
-
         else:
             capacity_hp = int(
                 rig_rows[
@@ -496,9 +535,9 @@ def build_gantt(
 
         current_y += 2.5
 
-    # --------------------------------------------------------
+    # ========================================================
     # ACTIVIDADES
-    # --------------------------------------------------------
+    # ========================================================
 
     sorted_df = df.sort_values(
         [
@@ -541,6 +580,13 @@ def build_gantt(
         if end_date < start_date:
             continue
 
+        # Actividad completamente fuera del periodo
+        if (
+            end_date < start
+            or start_date > display_end
+        ):
+            continue
+
         y_value = y_map.get(
             (
                 rig,
@@ -550,6 +596,20 @@ def build_gantt(
 
         if y_value is None:
             continue
+
+        # ----------------------------------------------------
+        # RECORTE VISUAL
+        # ----------------------------------------------------
+
+        visible_start = max(
+            start_date,
+            start,
+        )
+
+        visible_end = min(
+            end_date,
+            display_end,
+        )
 
         # ----------------------------------------------------
         # COLOR
@@ -575,7 +635,7 @@ def build_gantt(
         )
 
         # ----------------------------------------------------
-        # TEXTO
+        # ETIQUETA
         # ----------------------------------------------------
 
         label = str(
@@ -597,8 +657,8 @@ def build_gantt(
 
         fig.add_shape(
             type="rect",
-            x0=start_date,
-            x1=end_date,
+            x0=visible_start,
+            x1=visible_end,
             y0=y_value - 0.38,
             y1=y_value + 0.38,
             line=dict(
@@ -610,10 +670,10 @@ def build_gantt(
         )
 
         midpoint = (
-            start_date
+            visible_start
             + (
-                end_date
-                - start_date
+                visible_end
+                - visible_start
             ) / 2
         )
 
@@ -641,7 +701,7 @@ def build_gantt(
         )
 
         # ----------------------------------------------------
-        # TEXTO EN BARRA
+        # TEXTO DE LA BARRA
         # ----------------------------------------------------
 
         fig.add_annotation(
@@ -650,7 +710,7 @@ def build_gantt(
             text=f"<b>{label}</b>",
             showarrow=False,
             font=dict(
-                size=11,
+                size=bar_font_size,
                 color="#111111",
             ),
             xanchor="center",
@@ -670,20 +730,173 @@ def build_gantt(
         )
 
     # ========================================================
-    # RANGO ANUAL
+    # ENCABEZADO
+    # IMPORTANTE:
+    # Las líneas siguientes SOLO se dibujan en el encabezado.
+    # y0/y1 usan coordenadas "paper".
     # ========================================================
 
-    start = pd.Timestamp(
-        year=year,
-        month=1,
-        day=1,
+    header_bottom = 1.01
+    week_top = 1.055
+    month_top = 1.105
+    quarter_top = 1.165
+    year_top = 1.235
+
+    # ========================================================
+    # AÑOS
+    # ========================================================
+
+    for current_year in range(
+        start_year,
+        start_year + years_to_show,
+    ):
+
+        year_start = pd.Timestamp(
+            current_year,
+            1,
+            1,
+        )
+
+        year_end = pd.Timestamp(
+            current_year + 1,
+            1,
+            1,
+        )
+
+        year_midpoint = (
+            year_start
+            + (
+                year_end
+                - year_start
+            ) / 2
+        )
+
+        # Separador SOLO en encabezado
+        fig.add_shape(
+            type="line",
+            x0=year_start,
+            x1=year_start,
+            y0=header_bottom,
+            y1=year_top,
+            xref="x",
+            yref="paper",
+            line=dict(
+                color="#17365D",
+                width=2.5,
+            ),
+        )
+
+        fig.add_annotation(
+            x=year_midpoint,
+            y=1.215,
+            xref="x",
+            yref="paper",
+            text=f"<b>{current_year}</b>",
+            showarrow=False,
+            font=dict(
+                size=year_font_size,
+                color="white",
+            ),
+            bgcolor="#1F4E78",
+            bordercolor="#17365D",
+            borderwidth=1,
+            borderpad=4,
+        )
+
+    # Separador final de años
+    fig.add_shape(
+        type="line",
+        x0=end,
+        x1=end,
+        y0=header_bottom,
+        y1=year_top,
+        xref="x",
+        yref="paper",
+        line=dict(
+            color="#17365D",
+            width=2.5,
+        ),
     )
 
-    end = pd.Timestamp(
-        year=year,
-        month=12,
-        day=31,
-    )
+    # ========================================================
+    # TRIMESTRES
+    # ========================================================
+
+    quarter_months = [
+        ("Q1", 1, 4),
+        ("Q2", 4, 7),
+        ("Q3", 7, 10),
+        ("Q4", 10, 13),
+    ]
+
+    for current_year in range(
+        start_year,
+        start_year + years_to_show,
+    ):
+
+        for (
+            quarter_name,
+            start_month,
+            end_month,
+        ) in quarter_months:
+
+            quarter_start = pd.Timestamp(
+                current_year,
+                start_month,
+                1,
+            )
+
+            if end_month == 13:
+
+                quarter_end = pd.Timestamp(
+                    current_year + 1,
+                    1,
+                    1,
+                )
+
+            else:
+
+                quarter_end = pd.Timestamp(
+                    current_year,
+                    end_month,
+                    1,
+                )
+
+            quarter_midpoint = (
+                quarter_start
+                + (
+                    quarter_end
+                    - quarter_start
+                ) / 2
+            )
+
+            # Línea SOLO en encabezado
+            fig.add_shape(
+                type="line",
+                x0=quarter_start,
+                x1=quarter_start,
+                y0=header_bottom,
+                y1=quarter_top,
+                xref="x",
+                yref="paper",
+                line=dict(
+                    color="#1F4E78",
+                    width=1.8,
+                ),
+            )
+
+            fig.add_annotation(
+                x=quarter_midpoint,
+                y=1.145,
+                xref="x",
+                yref="paper",
+                text=f"<b>{quarter_name}</b>",
+                showarrow=False,
+                font=dict(
+                    size=quarter_font_size,
+                    color="#1F4E78",
+                ),
+            )
 
     # ========================================================
     # MESES
@@ -691,35 +904,161 @@ def build_gantt(
 
     month_starts = pd.date_range(
         start=start,
-        end=end,
+        end=display_end,
         freq="MS",
     )
 
-    month_names = [
-        "Ene",
-        "Feb",
-        "Mar",
-        "Abr",
-        "May",
-        "Jun",
-        "Jul",
-        "Ago",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dic",
-    ]
+    month_names_map = {
+        1: "Ene",
+        2: "Feb",
+        3: "Mar",
+        4: "Abr",
+        5: "May",
+        6: "Jun",
+        7: "Jul",
+        8: "Ago",
+        9: "Sep",
+        10: "Oct",
+        11: "Nov",
+        12: "Dic",
+    }
 
     for month_start in month_starts:
 
-        fig.add_vline(
-            x=month_start,
-            line_width=1,
-            line_color="rgba(31,78,121,0.20)",
+        next_month = (
+            month_start
+            + pd.offsets.MonthBegin(1)
+        )
+
+        month_midpoint = (
+            month_start
+            + (
+                next_month
+                - month_start
+            ) / 2
+        )
+
+        # Separador de mes SOLO en encabezado
+        fig.add_shape(
+            type="line",
+            x0=month_start,
+            x1=month_start,
+            y0=header_bottom,
+            y1=month_top,
+            xref="x",
+            yref="paper",
+            line=dict(
+                color="rgba(31,78,121,0.60)",
+                width=1,
+            ),
+        )
+
+        fig.add_annotation(
+            x=month_midpoint,
+            y=1.087,
+            xref="x",
+            yref="paper",
+            text=(
+                f"<b>"
+                f"{month_names_map[month_start.month]}"
+                f"</b>"
+            ),
+            showarrow=False,
+            font=dict(
+                size=month_font_size,
+                color="#17365D",
+            ),
+        )
+
+    # ========================================================
+    # SEMANAS
+    # ========================================================
+
+    for month_start in month_starts:
+
+        next_month = (
+            month_start
+            + pd.offsets.MonthBegin(1)
+        )
+
+        week_start = month_start
+        week_number = 1
+
+        while week_start < next_month:
+
+            week_end = min(
+                week_start
+                + pd.Timedelta(days=7),
+                next_month,
+            )
+
+            week_midpoint = (
+                week_start
+                + (
+                    week_end
+                    - week_start
+                ) / 2
+            )
+
+            # Separador de semana SOLO en encabezado
+            fig.add_shape(
+                type="line",
+                x0=week_start,
+                x1=week_start,
+                y0=header_bottom,
+                y1=week_top,
+                xref="x",
+                yref="paper",
+                line=dict(
+                    color="rgba(90,105,120,0.45)",
+                    width=0.5,
+                ),
+            )
+
+            fig.add_annotation(
+                x=week_midpoint,
+                y=1.033,
+                xref="x",
+                yref="paper",
+                text=f"S{week_number}",
+                showarrow=False,
+                font=dict(
+                    size=week_font_size,
+                    color="#5B6573",
+                ),
+            )
+
+            week_start = week_end
+            week_number += 1
+
+    # ========================================================
+    # LÍNEAS HORIZONTALES DEL ENCABEZADO
+    # ========================================================
+
+    for header_y in [
+        header_bottom,
+        week_top,
+        month_top,
+        quarter_top,
+    ]:
+
+        fig.add_shape(
+            type="line",
+            x0=start,
+            x1=end,
+            y0=header_y,
+            y1=header_y,
+            xref="x",
+            yref="paper",
+            line=dict(
+                color="rgba(31,78,121,0.35)",
+                width=1,
+            ),
         )
 
     # ========================================================
     # FECHA ACTUAL
+    # Esta sí atraviesa el Gantt
     # ========================================================
 
     today = (
@@ -728,7 +1067,7 @@ def build_gantt(
         .normalize()
     )
 
-    if start <= today <= end:
+    if start <= today <= display_end:
 
         fig.add_vline(
             x=today,
@@ -739,133 +1078,19 @@ def build_gantt(
 
         fig.add_annotation(
             x=today,
-            y=1.01,
+            y=1.005,
             xref="x",
             yref="paper",
             text="<b>HOY</b>",
             showarrow=False,
             font=dict(
-                size=11,
+                size=10,
                 color="#D13438",
             ),
         )
 
     # ========================================================
-    # TRIMESTRES
-    # ========================================================
-
-    quarters = [
-        (
-            "Q1",
-            pd.Timestamp(
-                year,
-                1,
-                1,
-            ),
-            pd.Timestamp(
-                year,
-                4,
-                1,
-            ),
-        ),
-        (
-            "Q2",
-            pd.Timestamp(
-                year,
-                4,
-                1,
-            ),
-            pd.Timestamp(
-                year,
-                7,
-                1,
-            ),
-        ),
-        (
-            "Q3",
-            pd.Timestamp(
-                year,
-                7,
-                1,
-            ),
-            pd.Timestamp(
-                year,
-                10,
-                1,
-            ),
-        ),
-        (
-            "Q4",
-            pd.Timestamp(
-                year,
-                10,
-                1,
-            ),
-            pd.Timestamp(
-                year + 1,
-                1,
-                1,
-            ),
-        ),
-    ]
-
-    for (
-        quarter,
-        quarter_start,
-        quarter_end,
-    ) in quarters:
-
-        quarter_midpoint = (
-            quarter_start
-            + (
-                quarter_end
-                - quarter_start
-            ) / 2
-        )
-
-        fig.add_annotation(
-            x=quarter_midpoint,
-            y=1.11,
-            xref="x",
-            yref="paper",
-            text=f"<b>{quarter}</b>",
-            showarrow=False,
-            font=dict(
-                size=14,
-                color="#1F4E78",
-            ),
-        )
-
-    # ========================================================
-    # AÑO
-    # ========================================================
-
-    year_midpoint = (
-        start
-        + (
-            end - start
-        ) / 2
-    )
-
-    fig.add_annotation(
-        x=year_midpoint,
-        y=1.21,
-        xref="x",
-        yref="paper",
-        text=f"<b>{year}</b>",
-        showarrow=False,
-        font=dict(
-            size=17,
-            color="white",
-        ),
-        bgcolor="#1F4E78",
-        bordercolor="#17365D",
-        borderwidth=1,
-        borderpad=6,
-    )
-
-    # ========================================================
-    # SEPARADORES
+    # SEPARADORES HORIZONTALES ENTRE EQUIPOS
     # ========================================================
 
     for rig in rig_order[:-1]:
@@ -916,15 +1141,19 @@ def build_gantt(
 
     fig.update_layout(
         height=chart_height,
+
         margin=dict(
             l=10,
             r=10,
-            t=125,
+            t=175,
             b=20,
         ),
+
         paper_bgcolor="#F4F7FB",
         plot_bgcolor="white",
+
         showlegend=False,
+
         font=dict(
             family="Segoe UI, Arial, sans-serif",
             color="#252423",
@@ -932,38 +1161,45 @@ def build_gantt(
 
         xaxis=dict(
             type="date",
+
             range=[
                 start,
                 end,
             ],
+
             side="top",
-            tickmode="array",
-            tickvals=list(
-                month_starts
-            ),
-            ticktext=month_names,
-            tickfont=dict(
-                size=12,
-                color="#17365D",
-            ),
-            showgrid=True,
-            gridcolor="rgba(31,78,121,0.10)",
+
+            showticklabels=False,
+
+            # IMPORTANTE:
+            # Sin cuadrícula vertical dentro del Gantt
+            showgrid=False,
+
             zeroline=False,
+
             fixedrange=False,
         ),
 
         yaxis=dict(
             tickmode="array",
+
             tickvals=tickvals,
+
             ticktext=ticktext,
+
             range=[
                 vertical_limit,
                 -0.8,
             ],
+
             autorange=False,
+
             showgrid=False,
+
             zeroline=False,
+
             fixedrange=True,
+
             tickfont=dict(
                 size=12,
             ),
@@ -1112,7 +1348,7 @@ with st.sidebar:
 
 
 # ============================================================
-# ENCABEZADO
+# ENCABEZADO GENERAL
 # ============================================================
 
 project_name = project.get(
@@ -1150,8 +1386,9 @@ if page == "Dashboard ejecutivo":
         "## Cronograma ejecutivo Plan vs. Real"
     )
 
-    col_year, col_rigs = st.columns(
+    col_year, col_period, col_rigs = st.columns(
         [
+            1,
             1,
             3,
         ]
@@ -1183,14 +1420,40 @@ if page == "Dashboard ejecutivo":
         )
 
     except ValueError:
-
         year_index = 1
 
+    # --------------------------------------------------------
+    # AÑO INICIAL
+    # --------------------------------------------------------
+
     year = col_year.selectbox(
-        "Año",
+        "Año inicial",
         available_years,
         index=year_index,
     )
+
+    # --------------------------------------------------------
+    # PERIODO
+    # --------------------------------------------------------
+
+    years_to_show = col_period.selectbox(
+        "Periodo",
+        options=[
+            1,
+            2,
+            3,
+        ],
+        index=0,
+        format_func=lambda value: (
+            f"{value} año"
+            if value == 1
+            else f"{value} años"
+        ),
+    )
+
+    # --------------------------------------------------------
+    # EQUIPOS
+    # --------------------------------------------------------
 
     rigs = sorted(
         df["rig"]
@@ -1214,9 +1477,14 @@ if page == "Dashboard ejecutivo":
         )
     ].copy()
 
+    # --------------------------------------------------------
+    # GANTT
+    # --------------------------------------------------------
+
     gantt_figure = build_gantt(
         filtered,
         year,
+        years_to_show,
     )
 
     st.plotly_chart(
@@ -1242,12 +1510,12 @@ elif page == "Actividades":
 
     st.caption(
         "Puedes agregar, modificar o eliminar actividades. "
-        "Los datos que gestiona esta tabla son directamente reflejados en el diagrama de Gantt "
-        
+        "Los datos que gestiona esta tabla son directamente "
+        "reflejados en el diagrama de Gantt."
     )
 
     # ========================================================
-    # LEYENDA VISUAL DE COLORES
+    # LEYENDA DE COLORES
     # ========================================================
 
     color_legend_html = """
@@ -1547,8 +1815,6 @@ Rojo
         use_container_width=True,
     )
 
-
-
     # ========================================================
     # GUARDAR CAMBIOS
     # ========================================================
@@ -1560,7 +1826,7 @@ Rojo
         ).copy()
 
         # ----------------------------------------------------
-        # CONVERTIR NOMBRE COLOR A HEX
+        # COLOR
         # ----------------------------------------------------
 
         if "color_name" in updated_df.columns:
@@ -1585,7 +1851,7 @@ Rojo
         )
 
         # ----------------------------------------------------
-        # ELIMINAR ACTIVIDADES
+        # ELIMINAR
         # ----------------------------------------------------
 
         deleted_count = 0
@@ -1616,7 +1882,7 @@ Rojo
             )
 
         # ----------------------------------------------------
-        # QUITAR FILAS COMPLETAMENTE VACÍAS
+        # FILAS VACÍAS
         # ----------------------------------------------------
 
         important_columns = [
@@ -1649,16 +1915,12 @@ Rojo
             updated_df
         )
 
-        # ----------------------------------------------------
-        # GUARDAR EN SESIÓN
-        # ----------------------------------------------------
-
         st.session_state.activities = (
             updated_df
         )
 
         # ----------------------------------------------------
-        # SINCRONIZAR PROJECT_DATA
+        # SINCRONIZAR PROJECT DATA
         # ----------------------------------------------------
 
         export_copy = (
@@ -1778,7 +2040,6 @@ elif page == "Proyecto y archivos":
             )
 
         except ValueError:
-
             status_index = 0
 
         project_status_input = st.selectbox(
